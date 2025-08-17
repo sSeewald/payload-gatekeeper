@@ -90,10 +90,15 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # Save the badges and coverage report to temp location
-          cp coverage/badges.svg /tmp/coverage-badge.svg
-          cp coverage/tests-badge.svg /tmp/tests-badge.svg
-          cp -r coverage/lcov-report/* /tmp/ 2>/dev/null || echo "No lcov-report found"
+          # Save the badges and coverage report to a safe temp location
+          mkdir -p /tmp/gh-pages-deploy
+          cp coverage/badges.svg /tmp/gh-pages-deploy/coverage-badge.svg
+          cp coverage/tests-badge.svg /tmp/gh-pages-deploy/tests-badge.svg
+          
+          # Copy coverage report if it exists
+          if [ -d "coverage/lcov-report" ]; then
+            cp -r coverage/lcov-report/* /tmp/gh-pages-deploy/
+          fi
 
           # Create orphan branch for badges if it doesn't exist
           git checkout --orphan gh-pages 2>/dev/null || git checkout gh-pages
@@ -102,14 +107,8 @@ jobs:
           git rm -rf . 2>/dev/null || true
           rm -rf * .[^.]*  2>/dev/null || true
 
-          # Copy the coverage report as root
-          if [ -f "/tmp/index.html" ]; then
-            cp -r /tmp/* ./
-          fi
-          
-          # Copy badges to root
-          cp /tmp/coverage-badge.svg ./coverage-badge.svg
-          cp /tmp/tests-badge.svg ./tests-badge.svg
+          # Copy everything from our temp directory
+          cp -r /tmp/gh-pages-deploy/* ./
           
           # Add all files
           git add .
