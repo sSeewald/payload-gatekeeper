@@ -9,8 +9,8 @@
 ## Test Coverage & Quality
 
 [![CI](https://github.com/sSeewald/payload-gatekeeper/actions/workflows/ci.yml/badge.svg)](https://github.com/sSeewald/payload-gatekeeper/actions/workflows/ci.yml)
-[![Test Coverage](https://raw.githubusercontent.com/sSeewald/payload-gatekeeper/gh-pages/coverage-badge.svg)](https://sSeewald.github.io/payload-gatekeeper/)
-[![Tests](https://raw.githubusercontent.com/sSeewald/payload-gatekeeper/gh-pages/tests-badge.svg)](https://sSeewald.github.io/payload-gatekeeper/)
+[![Test Coverage](https://sseewald.github.io/payload-gatekeeper/coverage-badge.svg)](https://sSeewald.github.io/payload-gatekeeper/)
+[![Tests](https://sseewald.github.io/payload-gatekeeper/tests-badge.svg)](https://sSeewald.github.io/payload-gatekeeper/)
 [![Dependabot](https://img.shields.io/badge/dependabot-enabled-blue.svg)](https://github.com/sSeewald/payload-gatekeeper/network/updates)
 
 A comprehensive, production-ready permissions system with role-based access control, automatic permission generation, and flexible configuration options. Your collections' trusted guardian.
@@ -781,10 +781,6 @@ Contributions are welcome! Please read our contributing guidelines before submit
 ## Support
 
 For issues, questions, or suggestions, please open an issue on GitHub.
-
-## Changelog
-
-See [CHANGELOG.md](CHANGELOG.md) for a list of changes.
 
 ## Roadmap
 
