@@ -1,0 +1,151 @@
+name: Publish to npm
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: 'Perform a dry run (no actual publish)'
+        required: false
+        type: boolean
+        default: false
+      tag:
+        description: 'npm dist-tag (latest, beta, next)'
+        required: false
+        type: choice
+        default: 'latest'
+        options:
+          - latest
+          - beta
+          - next
+          - alpha
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write  # For npm provenance
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+          cache: 'npm'
+
+      - name: Get package info
+        id: package
+        run: |
+          PACKAGE_NAME=$(node -p "require('./package.json').name")
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          echo "name=$PACKAGE_NAME" >> $GITHUB_OUTPUT
+          echo "version=$PACKAGE_VERSION" >> $GITHUB_OUTPUT
+
+          # Check if version exists on npm
+          if npm view "$PACKAGE_NAME@$PACKAGE_VERSION" version 2>/dev/null; then
+            echo "⚠️ Version $PACKAGE_VERSION already exists on npm!"
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "✅ Version $PACKAGE_VERSION is new"
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check if version already published
+        if: steps.package.outputs.exists == 'true' && github.event.inputs.dry-run != 'true'
+        run: |
+          echo "❌ Version ${{ steps.package.outputs.version }} is already published to npm"
+          echo "Please bump the version first using:"
+          echo "  - Create a PR from a fix/* branch for patch"
+          echo "  - Create a PR from a feature/* branch for minor"
+          echo "  - Create a PR from a major/* branch for major"
+          exit 1
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run linter
+        run: npm run lint
+
+      - name: Run tests
+        run: npm test
+
+      - name: Run type check
+        run: npm run type-check
+
+      - name: Build package
+        run: npm run build
+
+      - name: Verify build output
+        run: |
+          if [ ! -d "dist" ]; then
+            echo "❌ Build failed: dist directory not found"
+            exit 1
+          fi
+
+          echo "📦 Build output:"
+          ls -la dist/
+
+      - name: Dry run - Pack package
+        if: github.event.inputs.dry-run == 'true'
+        run: |
+          echo "🧪 Running in DRY RUN mode - no actual publish"
+          npm pack --dry-run
+          echo ""
+          echo "📋 Package contents:"
+          npm pack --dry-run 2>&1 | grep -E "^npm notice"
+
+      - name: Publish to npm
+        if: github.event.inputs.dry-run != 'true'
+        run: |
+          echo "🚀 Publishing ${{ steps.package.outputs.name }}@${{ steps.package.outputs.version }} to npm"
+          echo "   Tag: ${{ github.event.inputs.tag || 'latest' }}"
+
+          npm publish \
+            --access public \
+            --tag ${{ github.event.inputs.tag || 'latest' }} \
+            --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Verify publication
+        if: github.event.inputs.dry-run != 'true'
+        run: |
+          echo "⏳ Waiting for npm to update..."
+          sleep 10
+
+          # Check if package is available
+          if npm view "${{ steps.package.outputs.name }}@${{ steps.package.outputs.version }}" version; then
+            echo "✅ Successfully published to npm!"
+            echo "📦 View at: https://www.npmjs.com/package/${{ steps.package.outputs.name }}/v/${{ steps.package.outputs.version }}"
+          else
+            echo "⚠️ Package not immediately visible on npm, but this is normal. Check in a few minutes."
+          fi
+
+      - name: Summary
+        run: |
+          if [ "${{ github.event.inputs.dry-run }}" == "true" ]; then
+            echo "## 🧪 Dry Run Completed" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Package **${{ steps.package.outputs.name }}@${{ steps.package.outputs.version }}** is ready to publish." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "To actually publish, run this workflow again without dry-run." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## 🎉 Published to npm!" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "- **Package:** [${{ steps.package.outputs.name }}](https://www.npmjs.com/package/${{ steps.package.outputs.name }})" >> $GITHUB_STEP_SUMMARY
+            echo "- **Version:** ${{ steps.package.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Tag:** ${{ github.event.inputs.tag || 'latest' }}" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Installation" >> $GITHUB_STEP_SUMMARY
+            echo '```bash' >> $GITHUB_STEP_SUMMARY
+            echo "npm install ${{ steps.package.outputs.name }}@${{ steps.package.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### View on npm" >> $GITHUB_STEP_SUMMARY
+            echo "[https://www.npmjs.com/package/${{ steps.package.outputs.name }}/v/${{ steps.package.outputs.version }}](https://www.npmjs.com/package/${{ steps.package.outputs.name }}/v/${{ steps.package.outputs.version }})" >> $GITHUB_STEP_SUMMARY
+          fi

@@ -1,0 +1,51 @@
+# Source files
+src/
+__tests__/
+
+# Configuration files
+.github/
+.eslintrc.json
+.prettierrc
+jest.config.js
+jest.setup.js
+tsconfig.*.json
+tsconfig.json
+tsconfig.build.json
+
+# Development files
+*.log
+*.tgz
+.DS_Store
+.env*
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Test files
+coverage/
+*.test.ts
+*.test.tsx
+*.spec.ts
+*.spec.tsx
+
+# Documentation source
+docs/
+
+# Build artifacts (keep dist)
+# dist is included in package.json files array
+
+# Git
+.git/
+.gitignore
+
+# npm
+.npmrc
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Temporary files
+tmp/
+temp/
+*.tmp

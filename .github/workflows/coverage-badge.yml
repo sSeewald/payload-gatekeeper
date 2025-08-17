@@ -1,0 +1,119 @@
+name: Coverage Badge
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests with coverage
+        run: npm run test:coverage
+
+      - name: Generate Coverage Badge
+        uses: jaywcjlove/coverage-badges-cli@main
+        with:
+          source: coverage/coverage-summary.json
+          output: coverage/badges.svg
+      
+      - name: Generate Tests Badge
+        run: |
+          # Run tests to get the count
+          TEST_OUTPUT=$(npm test 2>&1)
+          TEST_COUNT=$(echo "$TEST_OUTPUT" | grep -oE "[0-9]+ passed" | grep -oE "[0-9]+" | tail -1)
+          
+          # Create a simple SVG badge for tests
+          cat > coverage/tests-badge.svg << EOF
+          <svg xmlns="http://www.w3.org/2000/svg" width="120" height="20">
+            <linearGradient id="b" x2="0" y2="100%">
+              <stop offset="0" stop-color="#bbb" stop-opacity=".1"/>
+              <stop offset="1" stop-opacity=".1"/>
+            </linearGradient>
+            <mask id="a">
+              <rect width="120" height="20" rx="3" fill="#fff"/>
+            </mask>
+            <g mask="url(#a)">
+              <path fill="#555" d="M0 0h45v20H0z"/>
+              <path fill="#4c1" d="M45 0h75v20H45z"/>
+              <path fill="url(#b)" d="M0 0h120v20H0z"/>
+            </g>
+            <g fill="#fff" text-anchor="middle" font-family="DejaVu Sans,Verdana,Geneva,sans-serif" font-size="11">
+              <text x="22.5" y="15" fill="#010101" fill-opacity=".3">tests</text>
+              <text x="22.5" y="14">tests</text>
+              <text x="82.5" y="15" fill="#010101" fill-opacity=".3">${TEST_COUNT} passing</text>
+              <text x="82.5" y="14">${TEST_COUNT} passing</text>
+            </g>
+          </svg>
+          EOF
+
+      - name: Extract Coverage and Test Info
+        id: coverage
+        run: |
+          # Extract coverage from lcov.info
+          LINES_TOTAL=$(grep -o "LF:[0-9]*" coverage/lcov.info | awk -F: '{sum+=$2} END {print sum}')
+          LINES_COVERED=$(grep -o "LH:[0-9]*" coverage/lcov.info | awk -F: '{sum+=$2} END {print sum}')
+
+          if [ "$LINES_TOTAL" -gt 0 ]; then
+            COVERAGE=$(echo "scale=1; $LINES_COVERED * 100 / $LINES_TOTAL" | bc)
+          else
+            COVERAGE=0
+          fi
+
+          # Extract test count from Jest output
+          TEST_COUNT=$(npm test 2>&1 | grep -oE "[0-9]+ passed" | grep -oE "[0-9]+" | tail -1)
+          
+          echo "Coverage: ${COVERAGE}%"
+          echo "Tests: ${TEST_COUNT} passing"
+          echo "percentage=${COVERAGE}" >> $GITHUB_OUTPUT
+          echo "test_count=${TEST_COUNT}" >> $GITHUB_OUTPUT
+
+      - name: Deploy to GitHub Pages
+        if: github.ref == 'refs/heads/main'
+        run: |
+          # Create/update gh-pages branch with coverage info
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Save the badges and coverage report to temp location
+          cp coverage/badges.svg /tmp/coverage-badge.svg
+          cp coverage/tests-badge.svg /tmp/tests-badge.svg
+          cp -r coverage/lcov-report/* /tmp/ 2>/dev/null || echo "No lcov-report found"
+
+          # Create orphan branch for badges if it doesn't exist
+          git checkout --orphan gh-pages 2>/dev/null || git checkout gh-pages
+
+          # Clean everything first
+          git rm -rf . 2>/dev/null || true
+          rm -rf * .[^.]*  2>/dev/null || true
+
+          # Copy the coverage report as root
+          if [ -f "/tmp/index.html" ]; then
+            cp -r /tmp/* ./
+          fi
+          
+          # Copy badges to root
+          cp /tmp/coverage-badge.svg ./coverage-badge.svg
+          cp /tmp/tests-badge.svg ./tests-badge.svg
+          
+          # Add all files
+          git add .
+          
+          # Commit and push
+          git commit -m "Update coverage: ${{ steps.coverage.outputs.percentage }}% | Tests: ${{ steps.coverage.outputs.test_count }} [skip ci]" || echo "No changes"
+          git push origin gh-pages --force

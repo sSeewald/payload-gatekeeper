@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["jest", "node"]
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "eslint.config.js"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
+  ]
+}

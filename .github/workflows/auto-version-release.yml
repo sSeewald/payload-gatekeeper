@@ -1,0 +1,326 @@
+name: Auto Version & Release
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'package.json'
+      - 'package-lock.json'
+      - 'CHANGELOG.md'
+
+jobs:
+  version-and-release:
+    # Only run on merged PRs or direct pushes (not on close without merge)
+    if: |
+      (github.event_name == 'pull_request' && github.event.pull_request.merged == true) ||
+      (github.event_name == 'push' && !contains(github.event.head_commit.message, '[skip ci]'))
+
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: read
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+      
+      - name: Check for existing releases
+        id: check_release
+        run: |
+          # Check if any tags exist
+          TAG_COUNT=$(git tag -l | wc -l)
+          if [ "$TAG_COUNT" -eq 0 ]; then
+            echo "📦 No tags found - will create initial release"
+            CURRENT_VERSION=$(node -p "require('./package.json').version")
+            echo "initial_release=true" >> $GITHUB_OUTPUT
+            echo "initial_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+          else
+            echo "initial_release=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Get branch name and determine version bump
+        id: version
+        run: |
+          # Check if this is initial release
+          if [ "${{ steps.check_release.outputs.initial_release }}" == "true" ]; then
+            echo "📦 Initial release - using version from package.json"
+            echo "bump=none" >> $GITHUB_OUTPUT
+            echo "skip=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          # For PRs, get the source branch name
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            BRANCH_NAME="${{ github.event.pull_request.head.ref }}"
+            echo "Source branch: $BRANCH_NAME"
+
+            # Check if this is a Dependabot PR
+            if [ "${{ github.event.pull_request.user.login }}" == "dependabot[bot]" ] || echo "$BRANCH_NAME" | grep -qE '^dependabot/'; then
+              echo "🤖 Dependabot PR detected - no version bump"
+              echo "skip=true" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+          else
+            # For direct pushes, check commit message for branch info
+            BRANCH_NAME=$(git log -1 --pretty=%B | grep -oP '(?<=from )[^\s]+' || echo "")
+            if [ -z "$BRANCH_NAME" ]; then
+              echo "No branch info in commit, checking for version tags in message"
+              COMMIT_MSG=$(git log -1 --pretty=%B)
+
+              # Check for Dependabot commits
+              if echo "$COMMIT_MSG" | grep -qE 'Bump .* from .* to .*|^\[dependabot\]|^chore\(deps'; then
+                echo "🤖 Dependabot commit detected - no version bump"
+                echo "skip=true" >> $GITHUB_OUTPUT
+                exit 0
+              fi
+
+              if echo "$COMMIT_MSG" | grep -qiE '\[major\]|breaking'; then
+                BRANCH_NAME="major/direct"
+              elif echo "$COMMIT_MSG" | grep -qiE '\[minor\]|feat'; then
+                BRANCH_NAME="feature/direct"
+              elif echo "$COMMIT_MSG" | grep -qiE '\[patch\]|fix'; then
+                BRANCH_NAME="fix/direct"
+              else
+                echo "No version bump needed"
+                echo "skip=true" >> $GITHUB_OUTPUT
+                exit 0
+              fi
+            fi
+          fi
+
+          # Determine version bump type based on branch prefix
+          if echo "$BRANCH_NAME" | grep -qE '^(major|breaking)/'; then
+            VERSION_BUMP="major"
+            echo "🚀 Major version bump detected"
+          elif echo "$BRANCH_NAME" | grep -qE '^(feature|feat)/'; then
+            VERSION_BUMP="minor"
+            echo "✨ Minor version bump detected"
+          elif echo "$BRANCH_NAME" | grep -qE '^(fix|bugfix|hotfix)/'; then
+            VERSION_BUMP="patch"
+            echo "🐛 Patch version bump detected"
+          elif echo "$BRANCH_NAME" | grep -qE '^(chore|docs|test|ci|refactor|style|dependabot)/'; then
+            echo "🔧 No version bump needed for $BRANCH_NAME"
+            echo "skip=true" >> $GITHUB_OUTPUT
+            exit 0
+          else
+            echo "ℹ️ Unknown branch pattern: $BRANCH_NAME - defaulting to patch"
+            VERSION_BUMP="patch"
+          fi
+
+          echo "branch=$BRANCH_NAME" >> $GITHUB_OUTPUT
+          echo "bump=$VERSION_BUMP" >> $GITHUB_OUTPUT
+          echo "skip=false" >> $GITHUB_OUTPUT
+
+      - name: Install dependencies
+        if: steps.version.outputs.skip != 'true'
+        run: npm ci
+
+      - name: Run tests
+        if: steps.version.outputs.skip != 'true'
+        run: npm test
+
+      - name: Generate test coverage
+        if: steps.version.outputs.skip != 'true'
+        id: test-coverage
+        run: |
+          npm run test:coverage
+
+          # Extract coverage percentage
+          if [ -f coverage/lcov.info ]; then
+            LINES_TOTAL=$(grep -o "LF:[0-9]*" coverage/lcov.info | awk -F: '{sum+=$2} END {print sum}')
+            LINES_COVERED=$(grep -o "LH:[0-9]*" coverage/lcov.info | awk -F: '{sum+=$2} END {print sum}')
+
+            if [ "$LINES_TOTAL" -gt 0 ]; then
+              COVERAGE=$(echo "scale=1; $LINES_COVERED * 100 / $LINES_TOTAL" | bc)
+            else
+              COVERAGE=0
+            fi
+          else
+            COVERAGE=0
+          fi
+
+          # Count tests
+          TEST_COUNT=$(npm test 2>&1 | grep -oP '\d+ passing' | grep -oP '\d+' | tail -1 || echo "0")
+
+          echo "coverage=$COVERAGE" >> $GITHUB_OUTPUT
+          echo "tests=$TEST_COUNT" >> $GITHUB_OUTPUT
+
+          # Determine coverage color
+          if (( $(echo "$COVERAGE >= 90" | bc -l) )); then
+            COVERAGE_COLOR="brightgreen"
+          elif (( $(echo "$COVERAGE >= 80" | bc -l) )); then
+            COVERAGE_COLOR="green"
+          elif (( $(echo "$COVERAGE >= 70" | bc -l) )); then
+            COVERAGE_COLOR="yellowgreen"
+          elif (( $(echo "$COVERAGE >= 60" | bc -l) )); then
+            COVERAGE_COLOR="yellow"
+          else
+            COVERAGE_COLOR="orange"
+          fi
+
+          echo "coverage_color=$COVERAGE_COLOR" >> $GITHUB_OUTPUT
+
+      - name: Update README badges
+        if: steps.version.outputs.skip != 'true'
+        run: |
+          # Update coverage badge
+          COVERAGE="${{ steps.test-coverage.outputs.coverage }}"
+          COVERAGE_COLOR="${{ steps.test-coverage.outputs.coverage_color }}"
+          TEST_COUNT="${{ steps.test-coverage.outputs.tests }}"
+
+          # Update Coverage Badge
+          sed -i "s|coverage-[0-9.]*%25-[a-z]*|coverage-${COVERAGE}%25-${COVERAGE_COLOR}|g" README.md
+
+          # Update Tests Badge
+          sed -i "s|tests-[0-9]*%20passing|tests-${TEST_COUNT}%20passing|g" README.md
+
+          # Update Version Badge (will be updated after version bump)
+          echo "Badges will be updated with new version"
+
+      - name: Bump version
+        if: steps.version.outputs.skip != 'true'
+        id: bump
+        run: |
+          # Get current version
+          CURRENT_VERSION=$(node -p "require('./package.json').version")
+          echo "Current version: $CURRENT_VERSION"
+
+          # Check if this is initial release
+          if [ "${{ steps.check_release.outputs.initial_release }}" == "true" ]; then
+            echo "Initial release - no version bump needed"
+            NEW_VERSION=$CURRENT_VERSION
+          else
+            # Bump version
+            npm version ${{ steps.version.outputs.bump }} --no-git-tag-version
+            # Get new version
+            NEW_VERSION=$(node -p "require('./package.json').version")
+          fi
+          
+          echo "New version: $NEW_VERSION"
+          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "tag=v$NEW_VERSION" >> $GITHUB_OUTPUT
+
+          # Update version badge in README
+          sed -i "s|npm/v/payload-gatekeeper|npm/v/payload-gatekeeper|g" README.md
+
+          # Only commit if there are changes
+          if [ "${{ steps.check_release.outputs.initial_release }}" != "true" ]; then
+            # Commit version bump and badge updates
+            git add package.json package-lock.json README.md
+            git commit -m "chore: bump version to $NEW_VERSION [skip ci]
+
+          Auto-bumped from $CURRENT_VERSION to $NEW_VERSION
+          Coverage: ${{ steps.test-coverage.outputs.coverage }}%
+          Tests: ${{ steps.test-coverage.outputs.tests }} passing
+          Triggered by: ${{ steps.version.outputs.branch }}"
+          elif git diff --staged --quiet; then
+            echo "No changes to commit for initial release"
+          else
+            # Commit only badge updates for initial release
+            git add README.md
+            git commit -m "chore: update badges for initial release [skip ci]
+
+          Coverage: ${{ steps.test-coverage.outputs.coverage }}%
+          Tests: ${{ steps.test-coverage.outputs.tests }} passing" || echo "No badge changes"
+          fi
+
+      - name: Push version commit
+        if: steps.version.outputs.skip != 'true'
+        run: |
+          # Only push if there are commits to push
+          if [ "${{ steps.check_release.outputs.initial_release }}" != "true" ]; then
+            git push origin main
+          elif git diff HEAD origin/main --quiet 2>/dev/null; then
+            echo "No commits to push for initial release"
+          else
+            git push origin main || echo "No changes to push"
+          fi
+
+      - name: Create and push tag
+        if: steps.version.outputs.skip != 'true'
+        run: |
+          git tag -a ${{ steps.bump.outputs.tag }} -m "Release ${{ steps.bump.outputs.tag }}
+
+          Version bump: ${{ steps.version.outputs.bump }}
+          Source: ${{ steps.version.outputs.branch }}"
+
+          git push origin ${{ steps.bump.outputs.tag }}
+
+      - name: Generate release notes content
+        if: steps.version.outputs.skip != 'true'
+        id: notes
+        run: |
+          # Get commits since last tag
+          if [ "${{ steps.check_release.outputs.initial_release }}" == "true" ]; then
+            echo "Initial release - including all commits"
+            COMMITS=$(git log --pretty=format:"- %s (%an)" --no-merges HEAD)
+            LAST_TAG=""
+          else
+            LAST_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+            if [ -z "$LAST_TAG" ]; then
+              echo "No previous tag found, including all commits"
+              COMMITS=$(git log --pretty=format:"- %s (%an)" --no-merges HEAD)
+            else
+              echo "Commits since $LAST_TAG"
+              COMMITS=$(git log --pretty=format:"- %s (%an)" --no-merges $LAST_TAG..HEAD)
+            fi
+          fi
+
+          # Create release notes
+          {
+            echo "## 🎉 Release ${{ steps.bump.outputs.tag }}"
+            echo ""
+            if [ "${{ steps.check_release.outputs.initial_release }}" == "true" ]; then
+              echo "**Initial Release** 🚀"
+              echo ""
+              echo "This is the first official release of Payload Gatekeeper!"
+            else
+              echo "**Version bump:** ${{ steps.version.outputs.bump }}"
+              echo "**Source branch:** ${{ steps.version.outputs.branch }}"
+            fi
+            echo ""
+            echo "### 📝 Changes"
+            echo "$COMMITS"
+          } > release_notes.md
+
+          cat release_notes.md
+
+      - name: Create GitHub Release
+        if: steps.version.outputs.skip != 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.bump.outputs.tag }}
+          name: ${{ steps.bump.outputs.tag }}
+          body_path: release_notes.md
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Summary
+        if: steps.version.outputs.skip != 'true'
+        run: |
+          echo "## 🎉 Version Released!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version:** ${{ steps.bump.outputs.tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Bump Type:** ${{ steps.version.outputs.bump }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Source Branch:** ${{ steps.version.outputs.branch }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Coverage:** ${{ steps.test-coverage.outputs.coverage }}%" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tests:** ${{ steps.test-coverage.outputs.tests }} passing" >> $GITHUB_STEP_SUMMARY

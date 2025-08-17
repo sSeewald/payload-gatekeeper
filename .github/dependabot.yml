@@ -1,0 +1,56 @@
+version: 2
+updates:
+  # npm dependencies
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "04:00"
+    open-pull-requests-limit: 10
+    # Commit message prefix - helps identify Dependabot commits
+    commit-message:
+      prefix: "chore"
+      prefix-development: "chore"
+      include: "scope"
+    # Labels for Dependabot PRs
+    labels:
+      - "dependencies"
+      - "automated"
+    # Grouped updates to reduce PR noise
+    groups:
+      dev-dependencies:
+        patterns:
+          - "@types/*"
+          - "eslint*"
+          - "jest*"
+          - "ts-*"
+          - "typescript"
+          - "@testing-library/*"
+          - "rimraf"
+          - "prettier"
+        update-types:
+          - "minor"
+          - "patch"
+      production-dependencies:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "@types/*"
+          - "eslint*"
+          - "jest*"
+          - "ts-*"
+          - "typescript"
+          - "@testing-library/*"
+          - "rimraf"
+          - "prettier"
+        update-types:
+          - "patch"
+    
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "04:00"
