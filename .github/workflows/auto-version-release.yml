@@ -4,19 +4,11 @@ on:
   pull_request:
     types: [closed]
     branches: [main]
-  push:
-    branches: [main]
-    paths-ignore:
-      - 'package.json'
-      - 'package-lock.json'
-      - 'CHANGELOG.md'
 
 jobs:
   version-and-release:
-    # Only run on merged PRs or direct pushes (not on close without merge)
-    if: |
-      (github.event_name == 'pull_request' && github.event.pull_request.merged == true) ||
-      (github.event_name == 'push' && !contains(github.event.head_commit.message, '[skip ci]'))
+    # Only run on merged PRs to main (not on close without merge or direct pushes to feature branches)
+    if: github.event.pull_request.merged == true
 
     runs-on: ubuntu-latest
     permissions:
@@ -65,43 +57,15 @@ jobs:
             exit 0
           fi
           
-          # For PRs, get the source branch name
-          if [ "${{ github.event_name }}" == "pull_request" ]; then
-            BRANCH_NAME="${{ github.event.pull_request.head.ref }}"
-            echo "Source branch: $BRANCH_NAME"
+          # Get the source branch name from the PR
+          BRANCH_NAME="${{ github.event.pull_request.head.ref }}"
+          echo "Source branch: $BRANCH_NAME"
 
-            # Check if this is a Dependabot PR
-            if [ "${{ github.event.pull_request.user.login }}" == "dependabot[bot]" ] || echo "$BRANCH_NAME" | grep -qE '^dependabot/'; then
-              echo "🤖 Dependabot PR detected - no version bump"
-              echo "skip=true" >> $GITHUB_OUTPUT
-              exit 0
-            fi
-          else
-            # For direct pushes, check commit message for branch info
-            BRANCH_NAME=$(git log -1 --pretty=%B | grep -oP '(?<=from )[^\s]+' || echo "")
-            if [ -z "$BRANCH_NAME" ]; then
-              echo "No branch info in commit, checking for version tags in message"
-              COMMIT_MSG=$(git log -1 --pretty=%B)
-
-              # Check for Dependabot commits
-              if echo "$COMMIT_MSG" | grep -qE 'Bump .* from .* to .*|^\[dependabot\]|^chore\(deps'; then
-                echo "🤖 Dependabot commit detected - no version bump"
-                echo "skip=true" >> $GITHUB_OUTPUT
-                exit 0
-              fi
-
-              if echo "$COMMIT_MSG" | grep -qiE '\[major\]|breaking'; then
-                BRANCH_NAME="major/direct"
-              elif echo "$COMMIT_MSG" | grep -qiE '\[minor\]|feat'; then
-                BRANCH_NAME="feature/direct"
-              elif echo "$COMMIT_MSG" | grep -qiE '\[patch\]|fix'; then
-                BRANCH_NAME="fix/direct"
-              else
-                echo "No version bump needed"
-                echo "skip=true" >> $GITHUB_OUTPUT
-                exit 0
-              fi
-            fi
+          # Check if this is a Dependabot PR
+          if [ "${{ github.event.pull_request.user.login }}" == "dependabot[bot]" ] || echo "$BRANCH_NAME" | grep -qE '^dependabot/'; then
+            echo "🤖 Dependabot PR detected - no version bump"
+            echo "skip=true" >> $GITHUB_OUTPUT
+            exit 0
           fi
 
           # Determine version bump type based on branch prefix
