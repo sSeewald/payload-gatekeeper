@@ -1,6 +1,6 @@
 {
   "name": "payload-gatekeeper",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "The ultimate access control gatekeeper for Payload CMS v3 - Advanced RBAC with wildcard support, auto role assignment, and flexible configuration",
   "type": "module",
   "main": "dist/cjs/index.js",
