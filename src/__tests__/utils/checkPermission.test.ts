@@ -172,13 +172,15 @@ describe('checkPermission', () => {
       expect(result).toBe(false)
     })
 
-    it('should handle null role', async () => {
-      const result = await checkPermission(mockPayload, null, 'posts.read')
+    it('should handle null role with userId', async () => {
+      // User with null role = no permissions
+      const result = await checkPermission(mockPayload, null, 'posts.read', 'user-123')
       expect(result).toBe(false)
     })
 
-    it('should handle undefined role', async () => {
-      const result = await checkPermission(mockPayload, undefined as any, 'posts.read')
+    it('should handle undefined role with userId', async () => {
+      // User with undefined role = no permissions  
+      const result = await checkPermission(mockPayload, undefined as any, 'posts.read', 'user-123')
       expect(result).toBe(false)
     })
 
@@ -209,7 +211,7 @@ describe('checkPermission', () => {
     })
 
     it('should not give special treatment to non-first users', async () => {
-      // User ID 2 with no role
+      // User ID 2 with no role (has userId so not public)
       const result1 = await checkPermission(mockPayload, null, 'posts.read', 2)
       expect(result1).toBe(false)
       
@@ -326,8 +328,20 @@ describe('checkPermission', () => {
       expect(result).toBe(true)
     })
 
-    it('should handle undefined role', async () => {
+    it('should handle undefined role with userId (no public access)', async () => {
+      const result = await checkPermission(mockPayload, undefined, 'posts.read', 'user-123')
+      expect(result).toBe(false)
+    })
+
+    it('should allow public read when no user and no role', async () => {
+      // No userId and no role = public user with default *.read
       const result = await checkPermission(mockPayload, undefined, 'posts.read')
+      expect(result).toBe(true)
+    })
+
+    it('should deny public write operations', async () => {
+      // Public user trying to write
+      const result = await checkPermission(mockPayload, undefined, 'posts.create')
       expect(result).toBe(false)
     })
 

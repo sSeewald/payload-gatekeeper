@@ -1,4 +1,5 @@
 import type { CollectionConfig, CollectionBeforeDeleteHook, CollectionBeforeChangeHook, CollectionAfterChangeHook } from 'payload'
+import { ValidationError, Forbidden } from 'payload'
 
 import { checkPermission } from '../utils/checkPermission'
 import { formatLabel } from '../utils/formatLabel'
@@ -10,7 +11,8 @@ import type { GatekeeperOptions } from '../types'
 
 export const createRolesCollection = (
   collections: CollectionConfig[],
-  options: GatekeeperOptions = {}
+  options: GatekeeperOptions = {},
+  adminCollectionSlug?: string
 ): CollectionConfig => {
   const rolesSlug = options.rolesSlug || 'roles'
 
@@ -37,19 +39,22 @@ export const createRolesCollection = (
     read: async ({ req }) => {
       // Allow reading roles during first user setup
       if (!req.user) {
-        // Check if this is the first user setup by counting backend users
-        try {
-          const userCount = await req.payload.count({
-            collection: 'backend-users',
-          })
-          // Allow read access if no users exist (first user setup)
-          if (userCount.totalDocs === 0) {
-            return true
+        // Check if this is the first user setup in the admin collection
+        // Only the admin collection (config.admin.user) matters for first user setup
+        if (adminCollectionSlug) {
+          try {
+            const userCount = await req.payload.count({
+              collection: adminCollectionSlug as 'users',
+            })
+            // Allow access only if no users exist in the admin collection
+            return userCount.totalDocs === 0
+          } catch (error) {
+            // If we can't count, deny access for security
+            console.error('Error checking admin user count for roles access:', error)
+            return false
           }
-        } catch (error) {
-          // If we can't count, deny access
-          console.error('Error checking user count for roles access:', error)
         }
+        // No admin collection configured, deny access
         return false
       }
       return true
@@ -62,12 +67,48 @@ export const createRolesCollection = (
       if (!user || !('role' in user) || !user.role) return false
       return await checkPermission(payload, user.role, 'roles.update')
     },
-    delete: async ({ req: { user, payload } }) => {
+    delete: async ({ req: { user, payload }, id }) => {
       if (!user || !('role' in user) || !user.role) return false
-      return await checkPermission(payload, user.role, 'roles.delete')
+
+      // Check if user has delete permission
+      const hasDeletePermission = await checkPermission(payload, user.role, 'roles.delete')
+      if (!hasDeletePermission) return false
+
+      // Check if the role is protected (cannot be deleted even by super admin)
+      if (id) {
+        try {
+          const role = await payload.findByID({
+            collection: getRolesSlug() as 'roles',
+            id,
+            depth: 0
+          })
+          if (role?.protected) {
+            return false // Protected roles cannot be deleted by anyone
+          }
+        } catch (error) {
+          // If we can't find the role, allow the delete attempt (will fail in beforeDelete hook)
+          console.warn('Could not check if role is protected:', error)
+        }
+      }
+
+      return true
     },
   },
   fields: [
+    // UI-only field to show protected role notice at the top of the form
+    {
+      type: 'ui',
+      name: 'protectedNotice',
+      admin: {
+        condition: (data) => data?.protected === true,
+        components: {
+          Field: {
+            path: 'payload-gatekeeper/components/ProtectedRoleNotice',
+            exportName: 'ProtectedRoleNotice',
+          },
+        },
+      },
+    },
     {
       name: 'name',
       type: 'text',
@@ -95,7 +136,7 @@ export const createRolesCollection = (
         value: perm.value,
       })),
       admin: {
-        description: 'Select permissions for this role. Use * for full access.',
+        description: 'Select permissions for this role.',
         className: 'permissions-select-field',
         components: {
           Field: {
@@ -119,6 +160,10 @@ export const createRolesCollection = (
       required: true,
       admin: {
         description: 'Inactive roles cannot be used',
+        condition: (data) => {
+          // Hide the active checkbox for protected roles (they must always be active)
+          return !data?.protected
+        },
       },
     },
     {
@@ -126,7 +171,7 @@ export const createRolesCollection = (
       type: 'checkbox',
       defaultValue: false,
       admin: {
-        hidden: true, // Don't show in UI
+        hidden: true, // Hide from UI, only used internally
       },
     },
     // System management fields for role synchronization
@@ -173,34 +218,113 @@ export const createRolesCollection = (
           value: c.slug,
         })),
       admin: {
-        description: 'Select which collections can see and assign this role. Leave empty for all collections.',
+        description: 'Select which auth-enabled collections can see and assign this role. Leave empty for all auth collections.',
       },
     },
   ],
   hooks: {
     beforeChange: [
-      (async ({ data, operation, originalDoc }) => {
-        // Skip during seeding
+      (async ({ data, operation, originalDoc, req }) => {
+        // Skip permission checks if configured
         const shouldSkip =
-          options.seedingMode === true ||
-          (typeof options.skipPermissionChecks === 'function'
+          typeof options.skipPermissionChecks === 'function'
             ? options.skipPermissionChecks()
-            : options.skipPermissionChecks)
+            : options.skipPermissionChecks
 
         if (shouldSkip) {
           return data
         }
 
-        // Protect super admin role
-        if (originalDoc?.protected && operation === 'update') {
-          // Only allow certain fields to be updated
-          const allowedFields = ['description', 'permissions']
-          const updates = Object.keys(data || {})
-          const hasDisallowedFields = updates.some(field => !allowedFields.includes(field))
+        const user = req.user
 
-          if (hasDisallowedFields) {
-            throw new Error('Protected roles can only have their description and permissions updated')
+        // Check if current user is super admin
+        let isSuperAdmin = false
+        if (user && 'role' in user) {
+          isSuperAdmin = await checkPermission(
+            req.payload,
+            user.role,
+            '*',
+            user.id
+          )
+        }
+
+        // Restrict protected role updates (applies to everyone including super admins)
+        if (originalDoc?.protected && operation === 'update') {
+          // Prevent name changes for protected roles
+          if (data.name && data.name !== originalDoc.name) {
+            throw new ValidationError({
+              collection: getRolesSlug(),
+              errors: [
+                {
+                  message: 'The name of a protected role cannot be changed.',
+                  path: 'name',
+                }
+              ]
+            })
           }
+        }
+
+        // Prevent super admin from removing * permission from THEIR OWN role
+        if (isSuperAdmin && operation === 'update' && user) {
+          // Get the user's current role ID
+          const userRoleId = user.role && typeof user.role === 'object' && 'id' in user.role
+            ? user.role.id
+            : user.role
+
+          // Check if this is the user's current role
+          const isUpdatingOwnRole = userRoleId === originalDoc?.id
+
+          // If updating own role and permissions are being changed
+          if (isUpdatingOwnRole && data.permissions !== undefined) {
+            if (!data.permissions.includes('*')) {
+              throw new ValidationError({
+                collection: getRolesSlug(),
+                errors: [
+                  {
+                    message: 'You cannot remove super admin permission from your own role. This would lock you out of the system.',
+                    path: 'permissions',
+                  }
+                ]
+              })
+            }
+          }
+        }
+
+        // Super admins can update any protected roles (after checks above)
+        if (isSuperAdmin) {
+          // Ensure protected roles are always active
+          if (originalDoc?.protected && operation === 'update') {
+            data.active = true
+          }
+          return data
+        }
+
+        // Non-super admins: additional restrictions for protected roles
+        if (originalDoc?.protected && operation === 'update') {
+          // Filter out system fields that Payload might include
+          const systemFields = ['id', 'createdAt', 'updatedAt', '_status', 'configHash', 'configVersion', 'active', 'name']
+          const dataFields = Object.keys(data || {}).filter(
+            field => !systemFields.includes(field)
+          )
+
+          // Check if any non-allowed fields are being updated
+          const allowedFields = ['description', 'permissions']
+          const disallowedFields = dataFields.filter(
+            field => !allowedFields.includes(field)
+          )
+
+          if (disallowedFields.length > 0) {
+            throw new ValidationError({
+              collection: getRolesSlug(),
+              errors: disallowedFields.map(field => ({
+                message: `Protected roles cannot have their "${field}" field modified. Only description and permissions can be updated.`,
+                path: field,
+              }))
+            })
+          }
+
+          // Force active to true for protected roles
+          data.active = true
         }
 
         return data
@@ -210,7 +334,10 @@ export const createRolesCollection = (
       (async ({ id, req }) => {
         const doc = await req.payload.findByID({ collection: getRolesSlug() as 'roles', id })
         if (doc?.protected) {
-          throw new Error('Protected roles cannot be deleted')
+          // Use Forbidden error for unauthorized deletion attempts
+          const error = new Forbidden()
+          error.message = `The role "${doc.label || doc.name}" is protected and cannot be deleted. Protected roles are essential for system operation.`
+          throw error
         }
       }) satisfies CollectionBeforeDeleteHook,
     ],

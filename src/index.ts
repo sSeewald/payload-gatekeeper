@@ -8,7 +8,7 @@ interface ProcessingCollectionConfig extends CollectionConfig {
 import { createRolesCollection } from './collections/Roles'
 import { enhanceAdminCollection } from './utils/enhanceAdminCollection'
 import { syncSystemRoles } from './utils/syncRoles'
-import { SUPER_ADMIN_ROLE } from './defaultRoles'
+import { SUPER_ADMIN_ROLE, PUBLIC_ROLE } from './defaultRoles'
 import { createAfterChangeHook } from './hooks'
 import { setRolesSlug, getRolesSlug } from './utils/getRolesSlug'
 import { createCollectionAccess, createUIVisibilityCheck } from './access'
@@ -31,10 +31,6 @@ export const gatekeeperPlugin = (options: GatekeeperOptions = {}): Plugin => {
       collections: collectionConfigs = {},
       defaultConfig = {},
       excludeCollections = [],
-      // Legacy support
-      enhanceAdminUser,
-      enhanceAllAuthCollections,
-      roleFieldPlacement,
       rolesSlug = 'roles',
     } = options
 
@@ -48,17 +44,8 @@ export const gatekeeperPlugin = (options: GatekeeperOptions = {}): Plugin => {
       console.warn('⚠️ No admin user collection configured. Permissions plugin may not work correctly.')
     }
 
-    // Build collection configs (handle legacy options)
+    // Build collection configs
     const finalCollectionConfigs = { ...collectionConfigs }
-
-    // Handle legacy enhanceAdminUser option
-    if (enhanceAdminUser !== undefined && adminCollectionSlug && !finalCollectionConfigs[adminCollectionSlug]) {
-      finalCollectionConfigs[adminCollectionSlug] = {
-        enhance: enhanceAdminUser,
-        roleFieldPlacement: roleFieldPlacement,
-        autoAssignFirstUser: true,
-      }
-    }
 
     // Process collections
     let enhancedCollections: ProcessingCollectionConfig[] = [...(config.collections || [])]
@@ -71,16 +58,8 @@ export const gatekeeperPlugin = (options: GatekeeperOptions = {}): Plugin => {
       const isExcluded = excludeCollections.includes(collection.slug)
 
       // If not explicitly configured, check if we should use default
-      if (!collectionConfig && collection.auth === true) {
-        // Legacy: enhanceAllAuthCollections
-        if (enhanceAllAuthCollections) {
-          collectionConfig = {
-            enhance: true,
-            ...defaultConfig,
-          }
-        } else if (defaultConfig.enhance) {
-          collectionConfig = defaultConfig as CollectionPermissionConfig
-        }
+      if (!collectionConfig && collection.auth === true && defaultConfig.enhance) {
+        collectionConfig = defaultConfig as CollectionPermissionConfig
       }
 
       // Phase 1: Enhancement (if configured)
@@ -88,7 +67,7 @@ export const gatekeeperPlugin = (options: GatekeeperOptions = {}): Plugin => {
         // Prepare options for enhancement
         const enhanceOptions = {
           ...options,
-          roleFieldPlacement: collectionConfig.roleFieldPlacement || options.roleFieldPlacement,
+          roleFieldPlacement: collectionConfig.roleFieldPlacement,
           roleFieldConfig: collectionConfig.roleFieldConfig,
         }
 
@@ -125,8 +104,19 @@ export const gatekeeperPlugin = (options: GatekeeperOptions = {}): Plugin => {
       return processedCollection
     })
 
+    // Identify the admin collection for first user setup
+    // Only check the admin collection configured in config.admin.user
+    let adminCollectionForFirstUser: string | undefined
+    if (adminCollectionSlug) {
+      const adminConfig = finalCollectionConfigs[adminCollectionSlug]
+      // Only pass it if it's enhanced and has autoAssignFirstUser
+      if (adminConfig?.enhance && adminConfig?.autoAssignFirstUser) {
+        adminCollectionForFirstUser = adminCollectionSlug
+      }
+    }
+
     // Create Roles collection with all available collections
-    const rolesCollection = createRolesCollection(enhancedCollections, options)
+    const rolesCollection = createRolesCollection(enhancedCollections, options, adminCollectionForFirstUser)
 
     // Add Roles collection if it doesn't exist
     const hasRolesCollection = enhancedCollections.some(c => c.slug === rolesSlug)
@@ -181,7 +171,7 @@ export const gatekeeperPlugin = (options: GatekeeperOptions = {}): Plugin => {
       return {
         ...cleanCollection,
         admin: enhancedAdmin,
-        access: createCollectionAccess(cleanCollection),
+        access: createCollectionAccess(cleanCollection, options),
       } as CollectionConfig
     })
 
@@ -216,9 +206,16 @@ export const gatekeeperPlugin = (options: GatekeeperOptions = {}): Plugin => {
               visibleFor: adminCollections.length > 0 ? adminCollections : undefined
             }
 
-            // Always include super_admin, plus any configured roles
+            // Prepare public role if not disabled
+            const publicRole = !options.disablePublicRole ? {
+              ...PUBLIC_ROLE,
+              permissions: options.publicRolePermissions || PUBLIC_ROLE.permissions
+            } : null
+
+            // Always include super_admin, public (if enabled), plus any configured roles
             const rolesToSync = [
               superAdminRole,
+              ...(publicRole ? [publicRole] : []),
               ...(options.systemRoles || [])
             ]
 

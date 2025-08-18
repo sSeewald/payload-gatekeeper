@@ -12,12 +12,11 @@ export const createBeforeOperationHook = (options: GatekeeperOptions = {}) => {
       return args
     }
 
-    // Skip during seeding - check config only
+    // Skip permission checks if configured
     const shouldSkip =
-      options.seedingMode === true ||
-      (typeof options.skipPermissionChecks === 'function'
+      typeof options.skipPermissionChecks === 'function'
         ? options.skipPermissionChecks()
-        : options.skipPermissionChecks)
+        : options.skipPermissionChecks
 
     if (shouldSkip) {
       return args
@@ -42,17 +41,7 @@ export const createBeforeOperationHook = (options: GatekeeperOptions = {}) => {
     const hasAccess = await checkPermission(req.payload, req.user.role, permission, req.user.id)
 
     if (!hasAccess) {
-      // Log if audit is enabled
-      if (options.enableAuditLog) {
-        console.warn(`🚫 Permission denied: User ${req.user.email} tried ${permission}`)
-      }
-
       throw new Error(`Permission denied: You don't have ${operation} access to ${collection}`)
-    }
-
-    // Log successful access if audit is enabled
-    if (options.enableAuditLog) {
-      console.info(`✅ Permission granted: User ${req.user.email} performed ${permission}`)
     }
 
     return args

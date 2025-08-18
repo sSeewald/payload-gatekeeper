@@ -117,59 +117,6 @@ describe('gatekeeperPlugin Integration', () => {
     expect(defaultRolesCollection).toBeUndefined()
   })
 
-  it('should handle legacy enhanceAdminUser option', async () => {
-    const legacyOptions = {
-      enhanceAdminUser: true,
-      roleFieldPlacement: {
-        tab: 'Security',
-        position: 'first',
-      },
-    }
-
-    const plugin = gatekeeperPlugin(legacyOptions as any)
-    const enhancedConfig = await plugin(baseConfig) as Config
-
-    const backendUsersCollection = enhancedConfig.collections?.find(
-      c => c.slug === 'backend-users'
-    )
-
-    // Should have role field added
-    const hasRoleField = backendUsersCollection?.fields.some(
-      (f: any) => f.name === 'role'
-    ) || backendUsersCollection?.fields.some(
-      (f: any) => f.type === 'tabs' && f.tabs.some(
-        (t: any) => t.fields.some((tf: any) => tf.name === 'role')
-      )
-    )
-    expect(hasRoleField).toBe(true)
-  })
-
-  it('should handle legacy enhanceAllAuthCollections option', async () => {
-    const legacyOptions = {
-      enhanceAllAuthCollections: true,
-    }
-
-    const plugin = gatekeeperPlugin(legacyOptions as any)
-    const enhancedConfig = await plugin(baseConfig) as Config
-
-    // Both auth collections should be enhanced
-    const backendUsers = enhancedConfig.collections?.find(
-      c => c.slug === 'backend-users'
-    )
-    const users = enhancedConfig.collections?.find(c => c.slug === 'users')
-
-    const backendUsersHasRole = backendUsers?.fields.some(
-      (f: any) => f.name === 'role'
-    )
-    const usersHasRole = users?.fields.some((f: any) => f.name === 'role')
-
-    expect(backendUsersHasRole || backendUsers?.fields.some(
-      (f: any) => f.type === 'tabs'
-    )).toBe(true)
-    expect(usersHasRole || users?.fields.some(
-      (f: any) => f.type === 'tabs'
-    )).toBe(true)
-  })
 
   it('should add afterChange hooks for collections with autoAssignFirstUser', async () => {
     const plugin = gatekeeperPlugin(mockPluginOptions)

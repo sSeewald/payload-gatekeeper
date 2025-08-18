@@ -1,4 +1,5 @@
 import type { Payload } from 'payload'
+import type { GatekeeperOptions } from '../types'
 import { PERMISSIONS } from '../constants'
 import { getRolesSlug } from './getRolesSlug'
 
@@ -121,7 +122,8 @@ export const checkPermission = async (
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   userRole: string | number | { [key: string]: any } | null | undefined,
   permission: string,
-  userId?: string | number
+  userId?: string | number,
+  options?: GatekeeperOptions
 ): Promise<boolean> => {
   try {
     // Special case: First user (ID 1) always has all permissions
@@ -130,7 +132,21 @@ export const checkPermission = async (
       return true
     }
 
-    // No role = no permissions (except for first user)
+    // Public user (no userId and no role) - use public role permissions
+    if (!userId && !userRole) {
+      // Check if public role is disabled
+      if (options?.disablePublicRole) {
+        return false
+      }
+
+      // Get public permissions (custom or default)
+      const publicPermissions = options?.publicRolePermissions || ['*.read']
+      
+      // Check permission against public permissions
+      return hasPermission(publicPermissions, permission)
+    }
+
+    // No role = no permissions (except for first user and public)
     // Allow role ID 0 but not null/undefined
     if (userRole === null || userRole === undefined) {
       return false
