@@ -1,8 +1,14 @@
 import type { CollectionConfig, Field, RelationshipField, TabsField, PayloadRequest } from 'payload'
-import type { GatekeeperOptions } from '../types'
+import type { GatekeeperOptions, RoleFieldPlacement } from '../types'
 import { getRolesSlug } from './getRolesSlug'
 import { createAfterLoginHook } from '../hooks'
 import { createAfterReadHook } from '../hooks'
+
+// Options specifically for enhancement
+interface EnhanceOptions extends GatekeeperOptions {
+  roleFieldPlacement?: RoleFieldPlacement
+  roleFieldConfig?: Partial<RelationshipField>
+}
 
 // Helper functions to reduce code duplication
 const shouldSkipPermissionCheck = (
@@ -14,9 +20,8 @@ const shouldSkipPermissionCheck = (
     return true
   }
 
-  // Skip during seeding
+  // Skip permission checks if configured
   return (
-    options.seedingMode === true ||
     (typeof options.skipPermissionChecks === 'function'
       ? options.skipPermissionChecks()
       : options.skipPermissionChecks) || false
@@ -74,7 +79,7 @@ const addFieldAtPosition = (
  */
 export const enhanceCollectionWithRole = (
   collection: CollectionConfig,
-  options: GatekeeperOptions = {}
+  options: EnhanceOptions = {}
 ): CollectionConfig => {
   // Check if we should skip
   if (options.skipIfRoleExists && hasRoleField(collection.fields)) {
@@ -120,7 +125,8 @@ export const enhanceCollectionWithRole = (
   // Check if collection uses tabs
   const tabsFieldIndex = fields.findIndex((f) => 'type' in f && f.type === 'tabs')
 
-  if (tabsFieldIndex !== -1) {
+  if (tabsFieldIndex !== -1 && placement.tab) {
+    // User explicitly wants to place in a tab
     // Deep clone only the tabs field structure (but not functions)
     const originalTabsField = fields[tabsFieldIndex] as TabsField
     const tabsField: TabsField = {
@@ -133,12 +139,13 @@ export const enhanceCollectionWithRole = (
     fields[tabsFieldIndex] = tabsField
 
     // Find or create the target tab
-    const targetTabName = placement.tab || 'User'
+    const targetTabName = placement.tab
     let targetTab = tabsField.tabs.find((t) => t.label === targetTabName)
 
     if (!targetTab) {
+      // Create new tab with the specified name
       targetTab = {
-        label: 'Security',
+        label: targetTabName,
         fields: []
       }
       tabsField.tabs.push(targetTab)
@@ -147,7 +154,8 @@ export const enhanceCollectionWithRole = (
     // Add role field to the tab
     addFieldAtPosition(targetTab.fields, roleField, placement.position)
   } else {
-    // No tabs - add directly to fields
+    // No specific tab placement requested, or no tabs exist
+    // Add directly to main fields
     addFieldAtPosition(fields, roleField, placement.position)
   }
 

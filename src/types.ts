@@ -1,14 +1,16 @@
 import type { RelationshipField } from 'payload'
 
+export type RoleFieldPlacement = {
+  tab?: string        // Which tab to add to
+  position?: 'first' | 'last' | 'sidebar' | number  // Position within tab/fields
+}
+
 export interface CollectionPermissionConfig {
   // Should enhance this collection with role field?
   enhance: boolean
 
   // Where to place the role field
-  roleFieldPlacement?: {
-    tab?: string        // Which tab to add to
-    position?: 'first' | 'last' | 'sidebar' | number  // Position within tab/fields
-  }
+  roleFieldPlacement?: RoleFieldPlacement
 
   // Should the first user in this collection get super admin?
   autoAssignFirstUser?: boolean
@@ -30,26 +32,11 @@ export interface GatekeeperOptions {
   // Default config for auth collections not explicitly configured
   defaultConfig?: Partial<CollectionPermissionConfig>
 
-  // Legacy: Should the plugin enhance the admin user collection?
-  enhanceAdminUser?: boolean
-
-  // Legacy: Should the plugin enhance ALL auth-enabled collections with role field?
-  enhanceAllAuthCollections?: boolean
-
-  // Legacy: Where to place the role field in admin user collection
-  roleFieldPlacement?: {
-    tab?: string        // Which tab to add to
-    position?: 'first' | 'last' | 'sidebar' | number  // Position within tab/fields
-  }
-
   // Skip if role field already exists
   skipIfRoleExists?: boolean
 
   // Collections to exclude from permission checks
   excludeCollections?: string[]
-
-  // Enable audit logging
-  enableAuditLog?: boolean
 
   // Custom permissions
   customPermissions?: Array<{
@@ -58,16 +45,8 @@ export interface GatekeeperOptions {
     description?: string
   }>
 
-  // Super admin configuration
-  superAdmin?: {
-    permission?: string // Default: '*'
-  }
-
   // Skip permission checks (useful for seeding/migration)
   skipPermissionChecks?: boolean | (() => boolean)
-
-  // Enable seeding mode - temporarily disables permission checks
-  seedingMode?: boolean
 
   // Force role sync on init (defaults to development only)
   syncRolesOnInit?: boolean
@@ -80,6 +59,19 @@ export interface GatekeeperOptions {
 
   // Custom slug for the Roles collection (default: 'roles')
   rolesSlug?: string
+
+  /**
+   * Disable the public role for non-authenticated users
+   * @default false
+   */
+  disablePublicRole?: boolean
+
+  /**
+   * Custom permissions for public (non-authenticated) users
+   * @default ['*.read'] - read access to all non-auth collections
+   * @example ['pages.read', 'posts.read', 'media.read', 'comments.create']
+   */
+  publicRolePermissions?: string[]
 }
 
 export interface Permission {

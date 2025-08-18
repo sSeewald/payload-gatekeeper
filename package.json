@@ -3,18 +3,18 @@
   "version": "1.0.0",
   "description": "The ultimate access control gatekeeper for Payload CMS v3 - Advanced RBAC with wildcard support, auto role assignment, and flexible configuration",
   "type": "module",
-  "main": "dist/cjs/index.cjs",
+  "main": "dist/cjs/index.js",
   "module": "dist/esm/index.js",
   "types": "dist/esm/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/esm/index.d.ts",
       "import": "./dist/esm/index.js",
-      "require": "./dist/cjs/index.cjs"
+      "require": "./dist/cjs/index.js"
     },
     "./components/*": {
       "import": "./dist/esm/components/*.js",
-      "require": "./dist/cjs/components/*.cjs"
+      "require": "./dist/cjs/components/*.js"
     },
     "./package.json": "./package.json"
   },

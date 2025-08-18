@@ -52,18 +52,22 @@ describe('structurePermissions Utility', () => {
       expect(result[0].category).toBe('Special')
     })
 
-    it('should put System category last', () => {
+    it('should sort categories alphabetically (except Special)', () => {
       const permissions: Permission[] = [
-        { label: 'System Logs', value: 'system.logs', category: 'System', description: '' },
+        { label: 'Zebra Action', value: 'zebra.action', category: 'zebra', description: '' },
         { label: 'Read Posts', value: 'posts.read', category: 'posts', description: '' },
         { label: 'Super Admin', value: '*', category: 'Special', description: '' },
+        { label: 'Analytics View', value: 'analytics.view', category: 'analytics', description: '' },
       ]
       
       const result = structurePermissions(permissions)
       
+      // Special should always be first
       expect(result[0].category).toBe('Special')
-      expect(result[1].category).toBe('posts')
-      expect(result[2].category).toBe('System')
+      // Others should be alphabetical
+      expect(result[1].category).toBe('analytics')
+      expect(result[2].category).toBe('posts')
+      expect(result[3].category).toBe('zebra')
     })
   })
 
@@ -164,19 +168,19 @@ describe('structurePermissions Utility', () => {
       })
     })
 
-    it('should handle System permissions as flat', () => {
+    it('should handle custom permissions as flat', () => {
       const permissions: Permission[] = [
-        { label: 'System Logs', value: 'system.logs', category: 'System', description: '' },
-        { label: 'System Analytics', value: 'system.analytics', category: 'System', description: '' },
+        { label: 'Export Data', value: 'export.data', category: 'export', description: '' },
+        { label: 'Export Users', value: 'export.users', category: 'export', description: '' },
       ]
       
       const result = structurePermissions(permissions)
       
-      // All System permissions should be flat
+      // All custom permissions should be flat (no wildcard)
       result.forEach(option => {
         expect(option.indent).toBe(0)
         expect(option.isParent).toBe(false)
-        expect(option.category).toBe('System')
+        expect(option.category).toBe('export')
       })
     })
   })
@@ -197,17 +201,17 @@ describe('structurePermissions Utility', () => {
       const permissions: Permission[] = [
         { label: 'Super Admin', value: '*', category: 'Special', description: '' },
         { label: 'Read Posts', value: 'posts.read', category: 'posts', description: '' },
-        { label: 'System Logs', value: 'system.logs', category: 'System', description: '' },
+        { label: 'Export Data', value: 'export.data', category: 'export', description: '' },
         { label: 'No Category', value: 'nocategory', description: '' } as Permission,
       ]
       
       const result = structurePermissions(permissions)
       
-      // Order should be: Special, Other, posts, System
+      // Order should be: Special, Other, export, posts (alphabetical after Special/Other)
       expect(result[0].category).toBe('Special')
       expect(result[1].category).toBe('Other')
-      expect(result[2].category).toBe('posts')
-      expect(result[3].category).toBe('System')
+      expect(result[2].category).toBe('export')
+      expect(result[3].category).toBe('posts')
     })
 
     it('should preserve description field', () => {

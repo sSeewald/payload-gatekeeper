@@ -1,17 +1,30 @@
-import type { CollectionConfig } from 'payload'
+import type { CollectionConfig, Access } from 'payload'
+import type { GatekeeperOptions } from '../types'
 import { createAccessWrapper } from './createAccessWrapper'
 
 /**
  * Creates wrapped access control for a collection
  * Preserves any custom access functions while adding permission checks
+ * Auth collections are protected from public access
  */
-export const createCollectionAccess = (collection: CollectionConfig) => {
+export const createCollectionAccess = (collection: CollectionConfig, options?: GatekeeperOptions) => {
+  // Special handling for auth collections - never allow public access
+  const readAccess: Access = collection.auth 
+    ? async (args) => {
+        // Auth collections: no public access
+        if (!args.req.user) return false
+        
+        // Use standard wrapper for authenticated users
+        return createAccessWrapper(collection.slug, 'read', collection.access?.read, options)(args)
+      }
+    : createAccessWrapper(collection.slug, 'read', collection.access?.read, options)
+
   const wrappedAccess: Record<string, unknown> = {
     // Wrap CRUD operations
-    read: createAccessWrapper(collection.slug, 'read', collection.access?.read),
-    create: createAccessWrapper(collection.slug, 'create', collection.access?.create),
-    update: createAccessWrapper(collection.slug, 'update', collection.access?.update),
-    delete: createAccessWrapper(collection.slug, 'delete', collection.access?.delete),
+    read: readAccess,
+    create: createAccessWrapper(collection.slug, 'create', collection.access?.create, options),
+    update: createAccessWrapper(collection.slug, 'update', collection.access?.update, options),
+    delete: createAccessWrapper(collection.slug, 'delete', collection.access?.delete, options),
   }
 
   // Preserve any other access control functions that might exist

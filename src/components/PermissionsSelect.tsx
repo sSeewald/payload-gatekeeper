@@ -300,11 +300,7 @@ export const PermissionsSelect: React.FC<PermissionsSelectProps> = props => {
       category:
         opt.value === '*' || opt.value.startsWith('*.')
           ? 'Special'
-          : opt.value.startsWith('system.') ||
-              opt.value.startsWith('logs.') ||
-              opt.value.startsWith('analytics.')
-            ? 'System'
-            : opt.value.split('.')[0], // Use collection name as category
+          : opt.value.split('.')[0], // Use collection name as category
       description: '',
     }))
 

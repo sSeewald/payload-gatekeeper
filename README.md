@@ -30,6 +30,22 @@ A comprehensive, production-ready permissions system with role-based access cont
 - ⚡ **Zero Config Start** - Works out of the box with sensible defaults
 - 🔧 **Fully Typed** - Complete TypeScript support
 
+## UI Overview
+
+Payload Gatekeeper provides a clean and intuitive interface for managing roles and permissions:
+
+### Roles Management
+![Roles Collection](docs/roles-collection-with-default-roles.png)
+*The Roles collection showing system default roles - fully manageable through the UI*
+
+### User Role Assignment
+![User Creation with Role Selection](docs/users-collection-create-new-user-select-roles.png)
+*Assigning roles when creating new users - with searchable dropdown*
+
+### Users with Roles
+![Users Collection with Roles](docs/users-collection-with-roles.png)
+*Users overview showing their assigned roles*
+
 ## Installation
 
 ```bash
@@ -55,12 +71,21 @@ export default buildConfig({
       collections: {
         'users': {
           enhance: true,
+          autoAssignFirstUser: true,
         }
-      }
+      },
+      // Exclude collections from permission system entirely
+      excludeCollections: ['special-config'] // These use their own access control
     })
   ]
 })
 ```
+
+### First User Setup
+When `autoAssignFirstUser` is enabled, the first user automatically receives the super_admin role:
+
+![First User Creation](docs/create-first-user.png)
+*The first user gets super admin privileges automatically*
 
 ## Configuration
 
@@ -143,11 +168,8 @@ export default buildConfig({
       // Optional: Exclude collections from permission system
       excludeCollections: ['public-pages'],
       
-      // Optional: Enable audit logging
-      enableAuditLog: false,
-      
       // Environment-based options
-      seedingMode: false,  // Set to true during seeding
+      skipPermissionChecks: false,  // Set to true during seeding/migration
       syncRolesOnInit: process.env.SYNC_ROLES === 'true',
       
       // UI customization
@@ -159,6 +181,41 @@ export default buildConfig({
 ```
 
 ## Core Concepts
+
+### Public Access
+
+Non-authenticated users automatically have configurable public access:
+
+```typescript
+// Default behavior - public can read all non-auth collections
+gatekeeperPlugin({})
+
+// Custom public permissions
+gatekeeperPlugin({
+  publicRolePermissions: [
+    '*.read',           // Read all collections
+    'comments.create',  // Can create comments
+    'reactions.create'  // Can add reactions
+  ]
+})
+
+// Completely private system
+gatekeeperPlugin({
+  disablePublicRole: true  // No public access at all
+})
+```
+
+**Important:** Auth-enabled collections (users, admins) are ALWAYS protected from public access, regardless of public permissions.
+
+### Role Management
+
+The plugin automatically creates a Roles collection where you can manage all roles through the UI:
+
+![Creating Editor Role](docs/roles-collection-create-new-role-editor.png)
+*Creating a new editor role with specific permissions*
+
+![Roles with Custom Editor](docs/roles-collection-with-custom-role-editor.png)
+*Roles collection showing both system and custom roles*
 
 ### Permission Patterns
 
@@ -175,12 +232,15 @@ The plugin supports various permission patterns:
 Protected roles cannot be deleted and have restricted field updates. Only users with `*` permission can modify protected roles.
 
 ```typescript
-{
+const superAdminRole = {
   name: 'super_admin',
   permissions: ['*'],
   protected: true,  // Cannot be deleted, limited updates
 }
 ```
+
+![Super Admin Role Details](docs/role-details-super-admin.png)
+*Protected super admin role showing the lock indicator and full permissions*
 
 ### UI Visibility vs CRUD Operations
 
@@ -405,14 +465,18 @@ gatekeeperPlugin({
 })
 ```
 
-### Seeding First Admin User
+### Seeding Users
+
+#### Simple: First Admin User (with autoAssignFirstUser)
+
+When `autoAssignFirstUser: true` is configured, you don't need to search for roles - the first user automatically gets super_admin:
 
 ```typescript
 // seed-admin.ts
 import { getPayload } from 'payload'
 import config from './payload.config'
 
-async function seedAdmin() {
+async function seedFirstAdmin() {
   const payload = await getPayload({ config })
 
   try {
@@ -426,30 +490,17 @@ async function seedAdmin() {
       return
     }
 
-    // Find the super_admin role (created by plugin on first start)
-    const superAdminRole = await payload.find({
-      collection: 'roles',
-      where: {
-        name: { equals: 'super_admin' },
-      },
-    })
-
-    if (superAdminRole.docs.length === 0) {
-      throw new Error('Super admin role not found! Start the application first.')
-    }
-
-    // Create the first admin user
+    // Create the first admin user - automatically gets super_admin role!
     await payload.create({
       collection: 'users',
       data: {
         email: 'admin@example.com',
         password: 'SecurePassword123!',
-        role: superAdminRole.docs[0].id,
-        // ... other fields
+        // No need to set role - autoAssignFirstUser handles it
       },
     })
 
-    console.log('✅ Admin user created successfully')
+    console.log('✅ First admin user created with super_admin role')
   } catch (error) {
     console.error('Error seeding admin:', error)
   }
@@ -457,7 +508,63 @@ async function seedAdmin() {
   process.exit(0)
 }
 
-seedAdmin()
+seedFirstAdmin()
+```
+
+#### Advanced: Multiple Users with Specific Roles
+
+Only search for roles when you need to create additional users with specific roles:
+
+```typescript
+// seed-users.ts
+async function seedUsers() {
+  const payload = await getPayload({ config })
+
+  try {
+    // Find specific roles for additional users
+    const editorRole = await payload.find({
+      collection: 'roles',
+      where: { name: { equals: 'editor' } },
+      limit: 1,
+    })
+
+    const viewerRole = await payload.find({
+      collection: 'roles',
+      where: { name: { equals: 'viewer' } },
+      limit: 1,
+    })
+
+    // Create editor user
+    if (editorRole.docs.length > 0) {
+      await payload.create({
+        collection: 'users',
+        data: {
+          email: 'editor@example.com',
+          password: 'EditorPass123!',
+          role: editorRole.docs[0].id,
+        },
+      })
+    }
+
+    // Create viewer user
+    if (viewerRole.docs.length > 0) {
+      await payload.create({
+        collection: 'users',
+        data: {
+          email: 'viewer@example.com',
+          password: 'ViewerPass123!',
+          role: viewerRole.docs[0].id,
+        },
+      })
+    }
+
+    console.log('✅ Additional users created')
+  } catch (error) {
+    console.error('Error seeding users:', error)
+  }
+}
+
+seedUsers()
 ```
 
 ### Custom Permission Checks in Your Code
@@ -494,8 +601,9 @@ async function myCustomEndpoint(req: PayloadRequest) {
 | `collections` | `object` | Collection-specific configuration | `{}` |
 | `systemRoles` | `array` | Roles to create/sync on init | `[]` |
 | `excludeCollections` | `string[]` | Collections to exclude from permission system | `[]` |
-| `enableAuditLog` | `boolean` | Enable audit logging | `false` |
-| `seedingMode` | `boolean` | Skip permission checks during seeding | `false` |
+| `disablePublicRole` | `boolean` | Disable public access for non-authenticated users | `false` |
+| `publicRolePermissions` | `string[]` | Custom permissions for public users | `['*.read']` |
+| `skipPermissionChecks` | `boolean \| (() => boolean)` | Skip permission checks (for seeding/migration) | `false` |
 | `syncRolesOnInit` | `boolean` | Force role sync on every init | `false` |
 | `rolesGroup` | `string` | UI group name for Roles collection | `'System'` |
 | `rolesSlug` | `string` | Custom slug for Roles collection | `'roles'` |
@@ -615,16 +723,32 @@ const Products: CollectionConfig = {
 // Both must pass for access to be granted
 ```
 
-### Environment Variables
+### Using Environment Variables
+
+The plugin doesn't read environment variables directly. You need to configure them in your plugin options:
+
+```typescript
+// payload.config.ts
+gatekeeperPlugin({
+  // Use environment variables in your config
+  syncRolesOnInit: process.env.SYNC_ROLES === 'true',
+  skipPermissionChecks: process.env.SKIP_PERMISSIONS === 'true',
+  
+  // Or use a function for dynamic control
+  skipPermissionChecks: () => process.env.NODE_ENV === 'seed',
+})
+```
+
+Then run your application with environment variables:
 
 ```bash
-# Skip permission checks during seeding (configure in plugin options)
-npm run seed
-
 # Force role synchronization
 SYNC_ROLES=true npm run dev
 
-# Development mode (auto-syncs roles)
+# Skip permissions during seeding
+NODE_ENV=seed npm run seed
+
+# Development mode (auto-syncs roles when NODE_ENV=development)
 NODE_ENV=development npm run dev
 ```
 
@@ -667,8 +791,6 @@ const role: Role = {
 ```
 
 ## Testing
-
-The plugin has comprehensive test coverage with a blackbox testing approach:
 
 ```bash
 # Run all tests
@@ -781,16 +903,6 @@ Contributions are welcome! Please read our contributing guidelines before submit
 ## Support
 
 For issues, questions, or suggestions, please open an issue on GitHub.
-
-## Roadmap
-
-- [ ] Global permissions UI component
-- [ ] Audit log persistence
-- [ ] Permission templates
-- [ ] Dynamic permission generation from custom fields
-- [ ] GraphQL support
-- [ ] Permission caching layer
-- [ ] Role hierarchy support
 
 ## Acknowledgments
 

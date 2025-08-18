@@ -26,12 +26,12 @@ export function structurePermissions(permissions: Permission[]): StructuredOptio
     return acc
   }, {} as Record<string, Permission[]>)
 
-  // Order categories: Special first, then collections alphabetically, then System
+  // Order categories: Special first, Other second, then everything else alphabetically
   const categoryOrder = Object.keys(grouped).sort((a, b) => {
     if (a === 'Special') return -1
     if (b === 'Special') return 1
-    if (a === 'System') return 1
-    if (b === 'System') return -1
+    if (a === 'Other') return -1
+    if (b === 'Other') return 1
     return a.localeCompare(b)
   })
 
@@ -39,8 +39,8 @@ export function structurePermissions(permissions: Permission[]): StructuredOptio
   categoryOrder.forEach(category => {
     const categoryPerms = grouped[category]
     
-    if (category === 'Special' || category === 'System') {
-      // Special and System permissions are flat (no hierarchy)
+    if (category === 'Special') {
+      // Special permissions are flat (no hierarchy)
       categoryPerms.forEach(perm => {
         structured.push({
           label: perm.label,

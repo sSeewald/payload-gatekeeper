@@ -14,6 +14,20 @@ export const SUPER_ADMIN_ROLE: SystemRole = {
 }
 
 /**
+ * Public role for non-authenticated users
+ * This role is automatically applied when no user is logged in
+ */
+export const PUBLIC_ROLE: SystemRole = {
+  name: 'public',
+  label: 'Public Access',
+  permissions: ['*.read'], // Default permissions, can be overridden
+  protected: true,
+  active: true,
+  description: 'Default permissions for non-authenticated users',
+  visibleFor: [], // Not visible in UI for assignment
+}
+
+/**
  * Example role configurations that can be used in the plugin config
  * These are NOT automatically created - they must be explicitly configured
  */
@@ -37,10 +51,6 @@ export const EXAMPLE_ROLES = {
       'media.create',
       'media.update',
       'media.delete',
-      // System operations (limited)
-      'system.export',
-      'analytics.read',
-      'logs.read',
     ],
     protected: false,
     active: true,
@@ -58,8 +68,6 @@ export const EXAMPLE_ROLES = {
       'media.create',
       'media.update',
       'media.delete',
-      // Limited analytics
-      'analytics.read',
     ],
     protected: false,
     active: true,

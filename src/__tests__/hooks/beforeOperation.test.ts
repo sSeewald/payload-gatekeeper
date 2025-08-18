@@ -4,16 +4,10 @@ import type { GatekeeperOptions } from '../../types'
 
 describe('createBeforeOperationHook', () => {
   let mockReq: any
-  let consoleWarnSpy: any
-  let consoleInfoSpy: any
 
   beforeEach(() => {
     jest.clearAllMocks()
     mockReq = createMockRequest()
-    
-    // Spy on console methods
-    consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {})
-    consoleInfoSpy = jest.spyOn(console, 'info').mockImplementation(() => {})
     
     // Suppress console.error during tests
     jest.spyOn(console, 'error').mockImplementation(() => {})
@@ -235,9 +229,9 @@ describe('createBeforeOperationHook', () => {
       expect(result).toBe(args)
     })
 
-    it('should skip check during seeding mode', async () => {
+    it('should skip check when skipPermissionChecks is true', async () => {
       const options: GatekeeperOptions = {
-        seedingMode: true,
+        skipPermissionChecks: true,
       }
       const hook = createBeforeOperationHook(options)
       
@@ -366,82 +360,6 @@ describe('createBeforeOperationHook', () => {
 
       const result = await hook({ args, operation: 'read' })
       expect(result).toBe(args)
-    })
-  })
-
-  describe('audit logging', () => {
-    it('should log successful access when audit is enabled', async () => {
-      const options: GatekeeperOptions = {
-        enableAuditLog: true,
-      }
-      const hook = createBeforeOperationHook(options)
-      
-      const user = createMockUser({
-        id: '2',
-        email: 'admin@example.com',
-        role: createMockRole({ permissions: ['*'] }),
-      })
-      mockReq.user = user
-
-      const args = {
-        req: mockReq,
-        collection: 'posts',
-        operation: 'delete',
-      }
-
-      await hook({ args, operation: 'delete' })
-      
-      expect(consoleInfoSpy).toHaveBeenCalledWith(
-        '✅ Permission granted: User admin@example.com performed posts.delete'
-      )
-    })
-
-    it('should log denied access when audit is enabled', async () => {
-      const options: GatekeeperOptions = {
-        enableAuditLog: true,
-      }
-      const hook = createBeforeOperationHook(options)
-      
-      const user = createMockUser({
-        id: '2',
-        email: 'hacker@example.com',
-        role: createMockRole({ permissions: [] }),
-      })
-      mockReq.user = user
-
-      const args = {
-        req: mockReq,
-        collection: 'sensitive-data',
-        operation: 'delete',
-      }
-
-      await expect(hook({ args, operation: 'delete' })).rejects.toThrow()
-      
-      expect(consoleWarnSpy).toHaveBeenCalledWith(
-        '🚫 Permission denied: User hacker@example.com tried sensitive-data.delete'
-      )
-    })
-
-    it('should not log when audit is disabled', async () => {
-      const hook = createBeforeOperationHook() // No audit option
-      
-      const user = createMockUser({
-        id: '2',
-        email: 'user@example.com',
-        role: createMockRole({ permissions: ['posts.read'] }),
-      })
-      mockReq.user = user
-
-      const args = {
-        req: mockReq,
-        collection: 'posts',
-        operation: 'read',
-      }
-
-      await hook({ args, operation: 'read' })
-      
-      expect(consoleInfoSpy).not.toHaveBeenCalled()
-      expect(consoleWarnSpy).not.toHaveBeenCalled()
     })
   })
 

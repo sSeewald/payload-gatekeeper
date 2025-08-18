@@ -10,11 +10,18 @@ describe('createAccessWrapper', () => {
     mockOriginalAccess = jest.fn()
   })
 
-  it('should return false when no user is present (requires auth)', async () => {
+  it('should allow public read when no user is present', async () => {
     const wrapper = createAccessWrapper('posts', 'read')
     const result = await wrapper({ req: mockReq })
     
-    expect(result).toBe(false)
+    expect(result).toBe(true) // Public users have *.read by default
+  })
+
+  it('should deny public write operations', async () => {
+    const wrapper = createAccessWrapper('posts', 'create')
+    const result = await wrapper({ req: mockReq })
+    
+    expect(result).toBe(false) // Public cannot write
   })
 
   it('should check permission when user has role object', async () => {

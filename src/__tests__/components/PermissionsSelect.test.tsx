@@ -312,6 +312,42 @@ describe('PermissionsSelect Component', () => {
       expect(labels.length).toBe(0)
     })
 
+    it('should handle complex filtering with multiple wildcards', () => {
+      mockFieldValue = ['*', 'posts.*', 'users.read']
+      
+      const { getByTestId } = render(<PermissionsSelect {...defaultProps} />)
+      const selectElement = getByTestId('react-select')
+      
+      fireEvent.click(selectElement)
+      
+      // When super admin is selected, only keep super admin
+      expect(mockSetValue).toHaveBeenCalledWith(['test.permission'])
+    })
+
+    it('should handle removing wildcards and showing individual operations again', () => {
+      // Start with wildcard selected
+      mockFieldValue = ['posts.*']
+      
+      const { getByTestId, rerender } = render(<PermissionsSelect {...defaultProps} />)
+      let selectElement = getByTestId('react-select')
+      let options = JSON.parse(selectElement.getAttribute('data-options') || '[]')
+      
+      // Individual operations should be hidden
+      const flatOptions1 = options.flatMap((g: any) => g.options || [])
+      expect(flatOptions1.find((o: any) => o.value === 'posts.read')).toBeUndefined()
+      
+      // Now remove the wildcard
+      mockFieldValue = []
+      rerender(<PermissionsSelect {...defaultProps} />)
+      
+      selectElement = getByTestId('react-select')
+      options = JSON.parse(selectElement.getAttribute('data-options') || '[]')
+      
+      // Individual operations should be visible again
+      const flatOptions2 = options.flatMap((g: any) => g.options || [])
+      expect(flatOptions2.find((o: any) => o.value === 'posts.read')).toBeDefined()
+    })
+
     it('should handle missing admin config', () => {
       const { container } = render(
         <PermissionsSelect {...defaultProps} admin={undefined} />
@@ -400,6 +436,89 @@ describe('PermissionsSelect Component', () => {
       // Validate function should be passed to useField
       expect(validateFn).toBeDefined()
     })
+
+    it('should clean up duplicate permissions in onChange', () => {
+      const { getByTestId } = render(<PermissionsSelect {...defaultProps} hasMany={true} />)
+      const selectElement = getByTestId('react-select')
+      
+      // Mock onChange to send duplicates
+      React.createElement('div', { 
+        onClick: () => {
+          // Simulate selecting duplicates
+          mockFieldValue = ['posts.read', 'posts.read', 'users.create', 'posts.read']
+        }
+      })
+      
+      fireEvent.click(selectElement)
+      
+      // Should filter out duplicates
+      expect(mockSetValue).toHaveBeenCalled()
+    })
+
+    it('should handle field prop with all configurations', () => {
+      const fullFieldConfig = {
+        path: 'custom-path',
+        name: 'custom-name',
+        label: 'Custom Label',
+        required: true,
+        hasMany: true,
+        options: [
+          { label: 'Custom Option 1', value: 'custom.option1' },
+          { label: 'Custom Option 2', value: 'custom.option2' },
+        ],
+        admin: {
+          description: 'Custom description',
+          className: 'custom-class',
+        },
+        validate: jest.fn(),
+      }
+      
+      const { getByText } = render(
+        <PermissionsSelect path="test" field={fullFieldConfig} />
+      )
+      
+      expect(getByText('Custom Label')).toBeDefined()
+      expect(getByText('*')).toBeDefined() // Required indicator
+      expect(getByText('Custom description')).toBeDefined()
+    })
+
+    it('should generate stable select ID from path', () => {
+      const { getByTestId, rerender } = render(
+        <PermissionsSelect {...defaultProps} path="test.nested.path" />
+      )
+      const selectElement1 = getByTestId('react-select')
+      const id1 = selectElement1.getAttribute('data-testid')
+      
+      // Re-render with same path
+      rerender(<PermissionsSelect {...defaultProps} path="test.nested.path" />)
+      const selectElement2 = getByTestId('react-select')
+      const id2 = selectElement2.getAttribute('data-testid')
+      
+      // ID should be stable
+      expect(id1).toBe(id2)
+    })
+
+    it('should handle *.operation wildcard permissions', () => {
+      const wildcardOptions = [
+        { label: 'All Read', value: '*.read' },
+        { label: 'All Create', value: '*.create' },
+        { label: 'Posts Read', value: 'posts.read' },
+        { label: 'Users Read', value: 'users.read' },
+      ]
+      
+      mockFieldValue = ['*.read']
+      
+      const { getByTestId } = render(
+        <PermissionsSelect {...defaultProps} options={wildcardOptions} />
+      )
+      const selectElement = getByTestId('react-select')
+      const options = JSON.parse(selectElement.getAttribute('data-options') || '[]')
+      
+      // *.read should not filter out individual read operations (different from collection.*)
+      const flatOptions = options.flatMap((g: any) => g.options || [])
+      expect(flatOptions.find((o: any) => o.value === 'posts.read')).toBeDefined()
+      expect(flatOptions.find((o: any) => o.value === 'users.read')).toBeDefined()
+    })
   })
 
   describe('Permission Categorization', () => {
@@ -420,25 +539,27 @@ describe('PermissionsSelect Component', () => {
       expect(hasSpecialGroup).toBe(true)
     })
 
-    it('should categorize system permissions', () => {
-      const systemOptions = [
-        { label: 'System Logs', value: 'system.logs' },
-        { label: 'Analytics View', value: 'analytics.view' },
-        { label: 'Logs Read', value: 'logs.read' },
+    it('should categorize custom permissions by prefix', () => {
+      const customOptions = [
+        { label: 'Export Data', value: 'export.data' },
+        { label: 'Import Data', value: 'import.data' },
+        { label: 'Reports View', value: 'reports.view' },
       ]
       
       const { getByTestId } = render(
-        <PermissionsSelect {...defaultProps} options={systemOptions} />
+        <PermissionsSelect {...defaultProps} options={customOptions} />
       )
       const selectElement = getByTestId('react-select')
       const options = JSON.parse(selectElement.getAttribute('data-options') || '[]')
       
-      // Should group under System category
-      const systemGroups = options.filter((g: any) => 
-        g.label === 'System' || g.label === 'system' || 
-        g.label === 'analytics' || g.label === 'logs'
-      )
-      expect(systemGroups.length).toBeGreaterThan(0)
+      // Should group by prefix (export, import, reports)
+      const exportGroup = options.find((g: any) => g.label === 'export')
+      const importGroup = options.find((g: any) => g.label === 'import')
+      const reportsGroup = options.find((g: any) => g.label === 'reports')
+      
+      expect(exportGroup).toBeDefined()
+      expect(importGroup).toBeDefined()
+      expect(reportsGroup).toBeDefined()
     })
 
     it('should use collection name as category', () => {

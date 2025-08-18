@@ -126,7 +126,7 @@ export const mockPluginOptions: GatekeeperOptions = {
   ],
   rolesSlug: 'roles',
   rolesGroup: 'System',
-  seedingMode: false,
+  skipPermissionChecks: false,
   syncRolesOnInit: true,
 }
 
